@@ -1,0 +1,7 @@
+{
+    "python.analysis.extraPaths": [
+        "./baseline_utils",
+        "./data_utils",
+        "./hd_utils"
+    ]
+}

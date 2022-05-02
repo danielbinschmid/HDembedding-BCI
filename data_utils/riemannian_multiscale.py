@@ -1,29 +1,29 @@
-#*----------------------------------------------------------------------------*
-#* Copyright (C) 2020 ETH Zurich, Switzerland                                 *
-#* SPDX-License-Identifier: Apache-2.0                                        *
-#*                                                                            *
-#* Licensed under the Apache License, Version 2.0 (the "License");            *
-#* you may not use this file except in compliance with the License.           *
-#* You may obtain a copy of the License at                                    *
-#*                                                                            *
-#* http://www.apache.org/licenses/LICENSE-2.0                                 *
-#*                                                                            *
-#* Unless required by applicable law or agreed to in writing, software        *
-#* distributed under the License is distributed on an "AS IS" BASIS,          *
-#* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.   *
-#* See the License for the specific language governing permissions and        *
-#* limitations under the License.                                             *
-#*                                                                            *
-#* Authors: Michael Hersche                                                   *
-#*----------------------------------------------------------------------------*
+# *----------------------------------------------------------------------------*
+# * Copyright (C) 2020 ETH Zurich, Switzerland                                 *
+# * SPDX-License-Identifier: Apache-2.0                                        *
+# *                                                                            *
+# * Licensed under the Apache License, Version 2.0 (the "License");            *
+# * you may not use this file except in compliance with the License.           *
+# * You may obtain a copy of the License at                                    *
+# *                                                                            *
+# * http://www.apache.org/licenses/LICENSE-2.0                                 *
+# *                                                                            *
+# * Unless required by applicable law or agreed to in writing, software        *
+# * distributed under the License is distributed on an "AS IS" BASIS,          *
+# * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.   *
+# * See the License for the specific language governing permissions and        *
+# * limitations under the License.                                             *
+# *                                                                            *
+# * Authors: Michael Hersche                                                   *
+# *----------------------------------------------------------------------------*
 
 #!/usr/bin/env python3
 
-'''	Functions used for calculating the Riemannian features'''
+"""	Functions used for calculating the Riemannian features"""
 
 import numpy as np
-from pyriemann.utils import mean,base
-import scipy 
+from pyriemann.utils import mean, base
+import scipy
 
 from filters import butter_fir_filter
 from eig import gevd
@@ -31,8 +31,9 @@ from eig import gevd
 __author__ = "Michael Hersche and Tino Rellstab"
 __email__ = "herschmi@ethz.ch,tinor@ethz.ch"
 
+
 class riemannian_multiscale:
-	""" Riemannian feature multiscale class 
+    """ Riemannian feature multiscale class 
 
 	Parameters
 	----------
@@ -60,35 +61,35 @@ class riemannian_multiscale:
 	
 	"""
 
-	def __init__(self,filter_bank,temp_windows,riem_opt = 'Riemann',rho = 0.1,vectorized = True):
-		# Frequency bands 
-		self.filter_bank = filter_bank
-		self.n_freq = filter_bank.shape[0]
-		# Temporal windows 
-		self.temp_windows = temp_windows
-		self.n_temp = temp_windows.shape[0]
-		# determine kernel function 
-		if riem_opt == 'Whitened_Euclid':
-			self.riem_kernel = self.whitened_kernel
-		else: 
-			self.riem_kernel = self.log_whitened_kernel 
-		# determine mean metric 
-		if riem_opt == 'Riemann':
-			self.mean_metric = 'riemann'
-		elif riem_opt == 'Riemann_Euclid' or riem_opt == 'Whitened_Euclid':
-			self.mean_metric = 'euclid'
-		self.riem_opt = riem_opt 
+    def __init__(
+        self, filter_bank, temp_windows, riem_opt="Riemann", rho=0.1, vectorized=True
+    ):
+        # Frequency bands
+        self.filter_bank = filter_bank
+        self.n_freq = filter_bank.shape[0]
+        # Temporal windows
+        self.temp_windows = temp_windows
+        self.n_temp = temp_windows.shape[0]
+        # determine kernel function
+        if riem_opt == "Whitened_Euclid":
+            self.riem_kernel = self.whitened_kernel
+        else:
+            self.riem_kernel = self.log_whitened_kernel
+        # determine mean metric
+        if riem_opt == "Riemann":
+            self.mean_metric = "riemann"
+        elif riem_opt == "Riemann_Euclid" or riem_opt == "Whitened_Euclid":
+            self.mean_metric = "euclid"
+        self.riem_opt = riem_opt
 
-		# regularization 
-		self.rho = rho
-		# vectorization (for SVM) 
-		self.vectorized = vectorized
+        # regularization
+        self.rho = rho
+        # vectorization (for SVM)
+        self.vectorized = vectorized
 
-
-
-	def fit(self,data):
-		'''
-		Calculate average covariance matrices and return freatures of training data
+    def fit(self, data):
+        """
+		Calculate average covariance matrices and return features of training data
 
 		Parameters
 		----------
@@ -99,57 +100,72 @@ class riemannian_multiscale:
 		------
 		train_feat: array, shape: if vectorized: (n_tr_trial,(n_temp x n_freq x n_riemann)
 								  else 			 (n_tr_trial,n_temp , n_freq , n_riemann)
-		'''
+		"""
 
-		n_tr_trial,n_channel,_ = data.shape
-		self.n_channel = n_channel
-		self.n_riemann = int((n_channel+1)*n_channel/2)
+        n_tr_trial, n_channel, _ = data.shape
+        self.n_channel = n_channel
+        self.n_riemann = int((n_channel + 1) * n_channel / 2)
 
-		cov_mat = np.zeros((n_tr_trial,self.n_temp,self.n_freq,n_channel,n_channel))
-		
-		# calculate training covariance matrices  
-		for trial_idx in range(n_tr_trial):	
-			
-			for temp_idx in range(self.n_temp): 
-				t_start,t_end  = self.temp_windows[temp_idx,0] ,self.temp_windows[temp_idx,1]
-				n_samples = t_end-t_start
-				
-				for freq_idx in range(self.n_freq): 
-					# filter signal 
-					data_filter = butter_fir_filter(data[trial_idx,:,t_start:t_end], self.filter_bank[freq_idx])
-					# regularized covariance matrix 
-					cov_mat[trial_idx,temp_idx,freq_idx] = 1/(n_samples-1)*np.dot(data_filter,np.transpose(data_filter)) + self.rho/n_samples*np.eye(n_channel)
-		
+        cov_mat = np.zeros((n_tr_trial, self.n_temp, self.n_freq, n_channel, n_channel))
 
-		# calculate mean covariance matrix 
-		self.c_ref_invsqrtm = np.zeros((self.n_freq,n_channel,n_channel))
+        # calculate training covariance matrices
+        for trial_idx in range(n_tr_trial):
 
-		for freq_idx in range(self.n_freq): 
-			
-			if self.riem_opt == 'No_Adaptation': 
-				self.c_ref_invsqrtm[freq_idx]= np.eye(n_channel)
-			else: 
-				# Mean covariance matrix over all trials and temp winds per frequency band 
-				cov_avg = mean.mean_covariance(cov_mat[:,:,freq_idx].reshape(-1,n_channel,n_channel), metric = self.mean_metric)
-				self.c_ref_invsqrtm[freq_idx] = base.invsqrtm(cov_avg)
+            for temp_idx in range(self.n_temp):
+                t_start, t_end = (
+                    self.temp_windows[temp_idx, 0],
+                    self.temp_windows[temp_idx, 1],
+                )
+                n_samples = t_end - t_start
 
-		# calculate training features 
-		train_feat = np.zeros((n_tr_trial,self.n_temp,self.n_freq,self.n_riemann))
+                for freq_idx in range(self.n_freq):
+                    # filter signal
+                    data_filter = butter_fir_filter(
+                        data[trial_idx, :, t_start:t_end], self.filter_bank[freq_idx]
+                    )
+                    # regularized covariance matrix
+                    cov_mat[trial_idx, temp_idx, freq_idx] = 1 / (
+                        n_samples - 1
+                    ) * np.dot(
+                        data_filter, np.transpose(data_filter)
+                    ) + self.rho / n_samples * np.eye(
+                        n_channel
+                    )
 
-		for trial_idx in range(n_tr_trial):	
-			for temp_idx in range(self.n_temp): 				
-				for freq_idx in range(self.n_freq): 
-					
-					train_feat[trial_idx,temp_idx,freq_idx] = self.riem_kernel(cov_mat[trial_idx,temp_idx,freq_idx],self.c_ref_invsqrtm[freq_idx])
+        # calculate mean covariance matrix
+        self.c_ref_invsqrtm = np.zeros((self.n_freq, n_channel, n_channel))
 
-		if self.vectorized: 
-			return train_feat.reshape(n_tr_trial,-1)
-		else: 
-			return train_feat
+        for freq_idx in range(self.n_freq):
 
+            if self.riem_opt == "No_Adaptation":
+                self.c_ref_invsqrtm[freq_idx] = np.eye(n_channel)
+            else:
+                # Mean covariance matrix over all trials and temp winds per frequency band
+                cov_avg = mean.mean_covariance(
+                    cov_mat[:, :, freq_idx].reshape(-1, n_channel, n_channel),
+                    metric=self.mean_metric,
+                )
+                self.c_ref_invsqrtm[freq_idx] = base.invsqrtm(cov_avg)
 
-	def features(self,data):
-		'''
+        # calculate training features
+        train_feat = np.zeros((n_tr_trial, self.n_temp, self.n_freq, self.n_riemann))
+
+        for trial_idx in range(n_tr_trial):
+            for temp_idx in range(self.n_temp):
+                for freq_idx in range(self.n_freq):
+
+                    train_feat[trial_idx, temp_idx, freq_idx] = self.riem_kernel(
+                        cov_mat[trial_idx, temp_idx, freq_idx],
+                        self.c_ref_invsqrtm[freq_idx],
+                    )
+
+        if self.vectorized:
+            return train_feat.reshape(n_tr_trial, -1)
+        else:
+            return train_feat
+
+    def features(self, data):
+        """
 		Generate multiscale Riemannian features 
 
 		Parameters
@@ -161,35 +177,43 @@ class riemannian_multiscale:
 		------
 		feat: array, shape: if vectorized: (n_trial,(n_temp x n_freq x n_riemann)
 								  else 			 (n_trial,n_temp , n_freq , n_riemann)
-		'''
-		n_trial = data.shape[0]
+		"""
+        n_trial = data.shape[0]
 
-		feat = np.zeros((n_trial,self.n_temp,self.n_freq,self.n_riemann))
+        feat = np.zeros((n_trial, self.n_temp, self.n_freq, self.n_riemann))
 
-		# calculate training covariance matrices  
-		for trial_idx in range(n_trial):	
-			
-			for temp_idx in range(self.n_temp): 
-				t_start,t_end  = self.temp_windows[temp_idx,0] ,self.temp_windows[temp_idx,1]
-				n_samples = t_end-t_start
+        # calculate training covariance matrices
+        for trial_idx in range(n_trial):
 
+            for temp_idx in range(self.n_temp):
+                t_start, t_end = (
+                    self.temp_windows[temp_idx, 0],
+                    self.temp_windows[temp_idx, 1],
+                )
+                n_samples = t_end - t_start
 
-				for freq_idx in range(self.n_freq): 
-					# filter signal 
-					data_filter = butter_fir_filter(data[trial_idx,:,t_start:t_end], self.filter_bank[freq_idx])
-					
-					# regularized covariance matrix 
-					cov_mat = 1/(n_samples-1)*np.dot(data_filter,np.transpose(data_filter)) + self.rho/n_samples*np.eye(self.n_channel)
-					# 
-					feat[trial_idx,temp_idx,freq_idx] = self.riem_kernel(cov_mat,self.c_ref_invsqrtm[freq_idx])
+                for freq_idx in range(self.n_freq):
+                    # filter signal
+                    data_filter = butter_fir_filter(
+                        data[trial_idx, :, t_start:t_end], self.filter_bank[freq_idx]
+                    )
 
-		if self.vectorized: 
-			return feat.reshape(n_trial,-1)
-		else: 
-			return feat
+                    # regularized covariance matrix
+                    cov_mat = 1 / (n_samples - 1) * np.dot(
+                        data_filter, np.transpose(data_filter)
+                    ) + self.rho / n_samples * np.eye(self.n_channel)
+                    #
+                    feat[trial_idx, temp_idx, freq_idx] = self.riem_kernel(
+                        cov_mat, self.c_ref_invsqrtm[freq_idx]
+                    )
 
-	def onetrial_feature(self,data):
-		'''
+        if self.vectorized:
+            return feat.reshape(n_trial, -1)
+        else:
+            return feat
+
+    def onetrial_feature(self, data):
+        """
 		Generate multiscale Riemannian one trial and temp window 
 
 		Parameters
@@ -201,28 +225,29 @@ class riemannian_multiscale:
 		------
 		feat: array, shape: if vectorized: (n_freq x n_riemann)
 								  else 		(n_freq , n_riemann)
-		'''
-		n_samples = data.shape[1]
+		"""
+        n_samples = data.shape[1]
 
-		feat = np.zeros((self.n_freq,self.n_riemann))
+        feat = np.zeros((self.n_freq, self.n_riemann))
 
-		for freq_idx in range(self.n_freq): 
-					# filter signal 
-					data_filter = butter_fir_filter(data, self.filter_bank[freq_idx])
-					
-					# regularized covariance matrix 
-					cov_mat = 1/(n_samples-1)*np.dot(data_filter,np.transpose(data_filter)) + self.rho/n_samples*np.eye(self.n_channel)
-					# 
-					feat[freq_idx] = self.riem_kernel(cov_mat,self.c_ref_invsqrtm[freq_idx])
+        for freq_idx in range(self.n_freq):
+            # filter signal
+            data_filter = butter_fir_filter(data, self.filter_bank[freq_idx])
 
-		if self.vectorized: 
-			return feat.reshape(-1)
-		else: 
-			return feat
+            # regularized covariance matrix
+            cov_mat = 1 / (n_samples - 1) * np.dot(
+                data_filter, np.transpose(data_filter)
+            ) + self.rho / n_samples * np.eye(self.n_channel)
+            #
+            feat[freq_idx] = self.riem_kernel(cov_mat, self.c_ref_invsqrtm[freq_idx])
 
+        if self.vectorized:
+            return feat.reshape(-1)
+        else:
+            return feat
 
-	def half_vectorization(self,mat):
-		'''	Calculates half vectorization of a matrix
+    def half_vectorization(self, mat):
+        """	Calculates half vectorization of a matrix
 
 		Parameters
 		----------
@@ -233,28 +258,32 @@ class riemannian_multiscale:
 		----------
 		vec: array, shape (n_riemann,)
 			Vectorized matrix 
-		'''
-		_,N = mat.shape 
+		"""
+        _, N = mat.shape
 
-		NO_elements = ((N+1)*N/2)
-		NO_elements = int(NO_elements)
-		out_vec = np.zeros(NO_elements)
+        NO_elements = (N + 1) * N / 2
+        NO_elements = int(NO_elements)
+        out_vec = np.zeros(NO_elements)
 
-		# fill diagonal elements with factor one 
-		out_vec[:N] = np.diag(mat)
+        # fill diagonal elements with factor one
+        out_vec[:N] = np.diag(mat)
 
-		mat = mat*np.sqrt(2)
-		idx = N
-		N_diag = N-1
-		for d in range(1,N):
-			out_vec[idx:idx+N_diag] = np.diag(mat,d)
-			idx +=N_diag
-			N_diag += (-1)
-		
-		return out_vec
+        mat = mat * np.sqrt(2)
+        idx = N
+        N_diag = N - 1
+        for d in range(1, N):
+            out_vec[idx : idx + N_diag] = np.diag(mat, d)
+            idx += N_diag
+            N_diag += -1
 
-	def whitened_kernel(self,mat,c_ref_invsqrtm): 
-		return self.half_vectorization(np.dot(np.dot(c_ref_invsqrtm,mat),c_ref_invsqrtm)) 
+        return out_vec
 
-	def log_whitened_kernel(self,mat,c_ref_invsqrtm): 
-		return self.half_vectorization(base.logm(np.dot(np.dot(c_ref_invsqrtm,mat),c_ref_invsqrtm))) 
+    def whitened_kernel(self, mat, c_ref_invsqrtm):
+        return self.half_vectorization(
+            np.dot(np.dot(c_ref_invsqrtm, mat), c_ref_invsqrtm)
+        )
+
+    def log_whitened_kernel(self, mat, c_ref_invsqrtm):
+        return self.half_vectorization(
+            base.logm(np.dot(np.dot(c_ref_invsqrtm, mat), c_ref_invsqrtm))
+        )

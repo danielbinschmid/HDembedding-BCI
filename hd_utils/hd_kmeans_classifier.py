@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 
-''' 
+""" 
 Hyperdimensional (HD) classifier using k-centroids per class as assotiative memory 
-'''
-import time, sys 
+"""
+import time, sys
 
 import numpy as np
-import torch 
+import torch
 
 
 from lsh import lsh
-from sklearn.svm import LinearSVC,SVC
+from sklearn.svm import LinearSVC, SVC
 
 from hd_bin_classifier_cuda import hd_classifier
 from HD_Kmeans import KMeans
@@ -19,8 +19,9 @@ __author__ = "Michael Hersche"
 __email__ = "herschmi@ethz.ch"
 __date__ = "2.5.2018"
 
+
 class hd_kmeans_classifier(hd_classifier):
-	'''		
+    """		
 	Parameters
 	----------
 	feat_dim: input feature dimension 
@@ -41,21 +42,52 @@ class hd_kmeans_classifier(hd_classifier):
 	n_classes: Number of classes 
 	
 
-	'''
+	"""
 
-	def __init__(self,feat_dim,spat_dim,HD_dim = 1000, d = 11, encoding = 'single', code = 'thermometer',sparsity = 0.5,learning = 'average',n_classes=4,cuda_device = 'cuda:0',k = 1):
-		
+    def __init__(
+        self,
+        feat_dim,
+        spat_dim,
+        HD_dim=1000,
+        d=11,
+        encoding="single",
+        code="thermometer",
+        sparsity=0.5,
+        learning="average",
+        n_classes=4,
+        cuda_device="cuda:0",
+        k=1,
+    ):
 
-		super().__init__(feat_dim,spat_dim,HD_dim,d,encoding, code,sparsity,learning,n_classes,cuda_device)
+        super().__init__(
+            feat_dim,
+            spat_dim,
+            HD_dim,
+            d,
+            encoding,
+            code,
+            sparsity,
+            learning,
+            n_classes,
+            cuda_device,
+        )
 
-		self.k = k # number of centroids per class 
-		self.AssMem = torch.ShortTensor(self.NO_classes,k,self.HD_dim).zero_().to(self.device)
-		self.kMean = KMeans(n_clusters=k, init='k-means++', n_init=10, max_iter=300, tol=1e-4, cuda_device = cuda_device)
-		self.fit = self.kmeans_fit
+        self.k = k  # number of centroids per class
+        self.AssMem = (
+            torch.ShortTensor(self.NO_classes, k, self.HD_dim).zero_().to(self.device)
+        )
+        self.kMean = KMeans(
+            n_clusters=k,
+            init="k-means++",
+            n_init=10,
+            max_iter=300,
+            tol=1e-4,
+            cuda_device=cuda_device,
+        )
+        self.fit = self.kmeans_fit
 
-
-	def kmeans_fit(self,samples, labels, n_iter = 0):
-		'''	Training of HD classifier redefine as K means learning 
+    def kmeans_fit(self, samples, labels, n_iter=0):
+        """	Training of HD classifier redefine as K means learning 
 		Parameters
 		----------
 		samples: feature sample, numpy array shape 	spatial:(NO_samples,1,spat_dim,N_feat) 
@@ -63,41 +95,47 @@ class hd_kmeans_classifier(hd_classifier):
 		lables: label of training data 
 		n_iter: number of aditinal training iterations for assotiative memory 
 
-		'''	
-		# Train projection if necessairy
-		if self.code == 'learn_HD_proj_SGD':
-			self.fit_learn_proj_sgd(samples, labels, n_iter = 0)
-		elif self.code == 'learn_HD_proj_ls':
-			self.fit_learn_proj_ls(samples, labels, n_iter = 0)
-		
-		# flatten all temporal windows 
-		_,temp_dim,spat_dim,N_feat = samples.shape
-		samples = samples.reshape(-1,spat_dim,N_feat)
-		labels= labels.repeat(temp_dim)
-			
-		NO_samples = samples.shape[0] 
+		"""
+        # Train projection if necessairy
+        if self.code == "learn_HD_proj_SGD":
+            self.fit_learn_proj_sgd(samples, labels, n_iter=0)
+        elif self.code == "learn_HD_proj_ls":
+            self.fit_learn_proj_ls(samples, labels, n_iter=0)
 
-		# HD vector of transformed vectors 
-		ClassItem = torch.ShortTensor(self.NO_classes,NO_samples,self.HD_dim).zero_().to(self.device)
-		# counts occurences of class for thresholding 
-		class_count = np.zeros(self.NO_classes,dtype = int) 
+        # flatten all temporal windows
+        _, temp_dim, spat_dim, N_feat = samples.shape
+        samples = samples.reshape(-1, spat_dim, N_feat)
+        labels = labels.repeat(temp_dim)
 
-		# transform every sample and store it in according class row 
-		for smpl_idx in range(NO_samples):
-			S, _ = self.transform(samples[smpl_idx], clipping = True) # get transformed HD_vector
-			label = int(labels[smpl_idx]-1) 
-			ClassItem[label,class_count[label]] = S 
-			class_count[label] += 1 
+        NO_samples = samples.shape[0]
 
-		# compute centroids for every 
-		for clas in range(self.NO_classes): 
-			self.kMean.fit(ClassItem[clas,:class_count[clas]])
-			self.AssMem[clas] = self.kMean.cluster_centers_
+        # HD vector of transformed vectors
+        ClassItem = (
+            torch.ShortTensor(self.NO_classes, NO_samples, self.HD_dim)
+            .zero_()
+            .to(self.device)
+        )
+        # counts occurences of class for thresholding
+        class_count = np.zeros(self.NO_classes, dtype=int)
 
-		return 
-	
-	def predict(self,samples):
-		'''	Predict multiple samples
+        # transform every sample and store it in according class row
+        for smpl_idx in range(NO_samples):
+            S, _ = self.transform(
+                samples[smpl_idx], clipping=True
+            )  # get transformed HD_vector
+            label = int(labels[smpl_idx] - 1)
+            ClassItem[label, class_count[label]] = S
+            class_count[label] += 1
+
+        # compute centroids for every
+        for clas in range(self.NO_classes):
+            self.kMean.fit(ClassItem[clas, : class_count[clas]])
+            self.AssMem[clas] = self.kMean.cluster_centers_
+
+        return
+
+    def predict(self, samples):
+        """	Predict multiple samples
 		Parameters
 		----------
 		samples: feature sample, numpy array shape 	spatial:(NO_samples,spat_dim,N_feat) 
@@ -106,46 +144,50 @@ class hd_kmeans_classifier(hd_classifier):
 		------
 		y_hat -- Vector of estimated output class, shape (NO_samples)
 		HD_score-- Vector of similarities [0,1], shape (NO_samples) 
-		'''	
-		# use one temporal window 
-		samples = samples[:,0]
+		"""
+        # use one temporal window
+        samples = samples[:, 0]
 
-		NO_samples = samples.shape[0] 	
-		
-		y_hat = np.zeros(NO_samples, dtype = int)
+        NO_samples = samples.shape[0]
 
-		HD_score = np.zeros((NO_samples,self.NO_classes))
+        y_hat = np.zeros(NO_samples, dtype=int)
 
-		for smpl_idx in range(0,NO_samples):
+        HD_score = np.zeros((NO_samples, self.NO_classes))
 
-			S, _ = self.transform(samples[smpl_idx], clipping = True) # get transformed HD_vector
-			# calculate minimum distance for every class 
-			for clas in range(self.NO_classes): 
-				score = 1-self.kMean.get_multi_HD_dist(S,self.AssMem[clas],n_item= self.k)
-				HD_score[smpl_idx,clas] = np.max(score)
+        for smpl_idx in range(0, NO_samples):
 
-			y_hat[smpl_idx] = np.argmax(HD_score[smpl_idx])+1
+            S, _ = self.transform(
+                samples[smpl_idx], clipping=True
+            )  # get transformed HD_vector
+            # calculate minimum distance for every class
+            for clas in range(self.NO_classes):
+                score = 1 - self.kMean.get_multi_HD_dist(
+                    S, self.AssMem[clas], n_item=self.k
+                )
+                HD_score[smpl_idx, clas] = np.max(score)
 
+            y_hat[smpl_idx] = np.argmax(HD_score[smpl_idx]) + 1
 
-		return y_hat, HD_score
+        return y_hat, HD_score
 
+    def single_predict(self, S):
 
-	def single_predict(self,S):
-		
-		HD_score = np.zeros(self.NO_classes)
-		
-		for clas in range(self.NO_classes): 
-			score = 1-self.kMean.get_multi_HD_dist(S,self.AssMem[clas],n_item= self.k)
-			HD_score[clas] = np.max(score)
+        HD_score = np.zeros(self.NO_classes)
 
-		y_hat = np.argmax(HD_score)+1
+        for clas in range(self.NO_classes):
+            score = 1 - self.kMean.get_multi_HD_dist(
+                S, self.AssMem[clas], n_item=self.k
+            )
+            HD_score[clas] = np.max(score)
 
-		return y_hat,HD_score
+        y_hat = np.argmax(HD_score) + 1
 
-	def set_learnable_params(self,ass_mem,proj_mat,enc_vec): 
+        return y_hat, HD_score
 
-		self.AssMem = ass_mem.to(self.device)
-		self.proj_mat = proj_mat.to(self.device)
-		self.enc_vec = enc_vec.to(self.device)
+    def set_learnable_params(self, ass_mem, proj_mat, enc_vec):
 
-		return
+        self.AssMem = ass_mem.to(self.device)
+        self.proj_mat = proj_mat.to(self.device)
+        self.enc_vec = enc_vec.to(self.device)
+
+        return
